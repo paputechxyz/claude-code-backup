@@ -23,6 +23,7 @@ const HOME = homedir();
 const BACKUP_DIR = join(HOME, ".claude-backups");
 const CONFIG_PATH = join(BACKUP_DIR, "config.json");
 const LOCK_PATH = join(BACKUP_DIR, ".lock");
+const NOTIFY_TITLE = "Claude Backup";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -241,14 +242,14 @@ async function cmdRun() {
   if (!(await acquireLock())) {
     log("Another backup is already running — skipping.");
     if (interactive) {
-      await notify("Claude Backup ⊘", "Another run is in progress; skipping.", true);
+      await notify(NOTIFY_TITLE, `⊘ Another run is in progress; skipping.`, true);
     }
     return;
   }
 
   try {
     if (interactive) {
-      await notify("Claude Backup ▶", `Started • ${ts()}`);
+      await notify(NOTIFY_TITLE, `▶ Started • ${ts()}`);
     }
 
     log("Scanning and exporting...");
@@ -272,21 +273,21 @@ async function cmdRun() {
 
     // Classify outcome and notify
     if (!result.pushed) {
-      await notify("Claude Backup ⚠️", `Push failed: ${result.message}`, true);
+      await notify(NOTIFY_TITLE, `⚠️ Push failed: ${result.message}`, true);
       process.exitCode = 1;
     } else if (errors.length > 0) {
       await notify(
-        "Claude Backup ⚠️",
-        `${copied} items backed up, ${errors.length} export warnings`,
+        NOTIFY_TITLE,
+        `⚠️ ${copied} items backed up, ${errors.length} export warnings`,
         true,
       );
     } else {
       const verb = result.committed ? `Backed up ${copied} items` : "No changes";
-      await notify("Claude Backup ✓", `${verb} • ${ts()}`);
+      await notify(NOTIFY_TITLE, `✓ ${verb} • ${ts()}`);
     }
   } catch (err) {
     log(`FATAL: ${err.message}`);
-    await notify("Claude Backup ✗", err.message, true);
+    await notify(NOTIFY_TITLE, `✗ ${err.message}`, true);
     process.exitCode = 1;
   } finally {
     releaseLock();
