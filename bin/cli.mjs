@@ -159,6 +159,7 @@ async function cmdInit() {
         "backup-*/",
         "*.log",
         "config.json",
+        ".lock",
         "",
       ].join("\n")
     );
@@ -290,7 +291,7 @@ async function cmdRun() {
     });
 
     // Classify outcome and notify
-    if (!result.pushed) {
+    if (result.committed && !result.pushed) {
       await notify(NOTIFY_TITLE, `⚠️ Push failed: ${result.message}`, true);
       process.exitCode = 1;
     } else if (errors.length > 0) {
@@ -300,7 +301,7 @@ async function cmdRun() {
         true,
       );
     } else {
-      const verb = result.committed ? `Backed up ${copied} items` : "No changes";
+      const verb = result.committed ? `Backed up ${copied} items` : "No-op";
       await notify(NOTIFY_TITLE, `✓ ${verb} • ${ts()}`);
     }
   } catch (err) {

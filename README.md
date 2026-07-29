@@ -69,7 +69,7 @@ Every backup run fires a macOS notification banner:
 | Outcome | Title | Body | Sound |
 |---|---|---|---|
 | Pushed clean | `Claude Backup` | `✓ Backed up N items • timestamp` | Glass |
-| Nothing to commit | `Claude Backup` | `✓ No changes • timestamp` | Glass |
+| No-op (nothing to commit) | `Claude Backup` | `✓ No-op • timestamp` | Glass |
 | Push failed (commit ok) | `Claude Backup` | `⚠️ Push failed: …` | Basso |
 | Export warnings | `Claude Backup` | `⚠️ N items, M warnings` | Basso |
 | Fatal error | `Claude Backup` | `✗ <error message>` | Basso |

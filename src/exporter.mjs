@@ -131,7 +131,6 @@ export async function exportLatest(backupDir = BACKUP_DIR) {
   }
 
   const summary = {
-    exportedAt: new Date().toISOString(),
     totalItems: exportableItems.length,
     copied,
     errors: errors.length,
