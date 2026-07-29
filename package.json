@@ -27,5 +27,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "scripts": {
+    "notify:test": "node bin/cli.mjs notify-test"
   }
 }

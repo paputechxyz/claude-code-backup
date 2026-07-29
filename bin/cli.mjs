@@ -24,6 +24,9 @@ const BACKUP_DIR = join(HOME, ".claude-backups");
 const CONFIG_PATH = join(BACKUP_DIR, "config.json");
 const LOCK_PATH = join(BACKUP_DIR, ".lock");
 const NOTIFY_TITLE = "Claude Backup";
+// Set to a bundle ID (e.g. "com.apple.Terminal") to brand the notification source.
+// Empty = use terminal-notifier's own attribution.
+const NOTIFY_SENDER = "";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -64,6 +67,21 @@ async function saveConfig(config) {
 
 async function notify(title, message, isError = false) {
   const sound = isError ? "Basso" : "Glass";
+  const trunc = (s) => String(s).slice(0, 200);
+  const args = [
+    "-title", trunc(title),
+    "-message", trunc(message),
+    "-sound", sound,
+    "-group", "claude-code-backup",
+  ];
+  if (NOTIFY_SENDER) args.push("-sender", NOTIFY_SENDER);
+
+  try {
+    await exec("terminal-notifier", args);
+    return;
+  } catch { /* fall through to osascript */ }
+
+  // Fallback: osascript (shows as "Script Editor" in Notification Center)
   const esc = (s) => String(s).replace(/["\\]/g, " ").slice(0, 200);
   try {
     await exec("osascript", [
@@ -331,6 +349,15 @@ async function cmdUninstall() {
   log("Scheduler removed. Backup data preserved in ~/.claude-backups/");
 }
 
+async function cmdNotifyTest() {
+  log("Sending test notification...");
+  await notify(
+    NOTIFY_TITLE,
+    "✓ Test notification — if you can read this, banners are working",
+  );
+  log("Sent. Check Notification Center.");
+}
+
 // ── Main ─────────────────────────────────────────────────────────────
 
 const command = process.argv[2];
@@ -348,13 +375,17 @@ switch (command) {
   case "uninstall":
     await cmdUninstall();
     break;
+  case "notify-test":
+    await cmdNotifyTest();
+    break;
   default:
     log("claude-code-backup — Automatic backup of all Claude Code settings\n");
     log("Usage:");
     log("  claude-code-backup init        Set up backup repo + schedule");
     log("  claude-code-backup run         Run backup now");
     log("  claude-code-backup status      Show backup status");
-    log("  claude-code-backup uninstall   Remove scheduled backup\n");
+    log("  claude-code-backup uninstall   Remove scheduled backup");
+    log("  claude-code-backup notify-test Send a test notification banner\n");
     log("Your skills, memories, rules, MCP configs, and settings — all safe.");
     break;
 }
