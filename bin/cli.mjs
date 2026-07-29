@@ -350,6 +350,45 @@ async function cmdUninstall() {
   log("Scheduler removed. Backup data preserved in ~/.claude-backups/");
 }
 
+async function cmdRestore() {
+  const dryRun = process.argv.includes("--dry-run");
+  const force = process.argv.includes("--force");
+
+  if (!dryRun && !force) {
+    log("⚠️  WARNING: This will overwrite existing local configurations, memories, skills, and plans.");
+    const answer = await ask("Are you sure you want to proceed? (y/N): ");
+    if (answer.toLowerCase() !== "y") {
+      log("Restore aborted.");
+      return;
+    }
+  }
+
+  const { restoreAll } = await import("../src/restorer.mjs");
+  log(dryRun ? "🔍 Previewing restore (dry-run)..." : "⏳ Restoring files...");
+
+  try {
+    const { restoredCount, mcpServersToMerge } = await restoreAll(BACKUP_DIR, { dryRun }, (msg) => {
+      log(msg);
+    });
+
+    log(`\n✓ Restore complete! Restored ${restoredCount} files.`);
+
+    if (mcpServersToMerge.length > 0) {
+      log("\n💡 Manual MCP Merges Required:");
+      log("The following MCP configurations were found in the backup. You will need to manually copy or merge their settings into your MCP host configuration:");
+      for (const mcp of mcpServersToMerge) {
+        if (mcp.scope === "global") {
+          log(`  - Server '${mcp.name}' (Global) -> Merge config from '${mcp.path}' into ~/.claude.json`);
+        } else {
+          log(`  - Server '${mcp.name}' (Project: ${mcp.scope}) -> Merge config from '${mcp.path}' into ${mcp.scope}/.mcp.json`);
+        }
+      }
+    }
+  } catch (err) {
+    log(`✗ Restore failed: ${err.message}`);
+  }
+}
+
 async function cmdNotifyTest() {
   log("Sending test notification...");
   await notify(
@@ -376,6 +415,9 @@ switch (command) {
   case "uninstall":
     await cmdUninstall();
     break;
+  case "restore":
+    await cmdRestore();
+    break;
   case "notify-test":
     await cmdNotifyTest();
     break;
@@ -385,6 +427,7 @@ switch (command) {
     log("  claude-code-backup init        Set up backup repo + schedule");
     log("  claude-code-backup run         Run backup now");
     log("  claude-code-backup status      Show backup status");
+    log("  claude-code-backup restore     Restore settings from the latest backup");
     log("  claude-code-backup uninstall   Remove scheduled backup");
     log("  claude-code-backup notify-test Send a test notification banner\n");
     log("Your skills, memories, rules, MCP configs, and settings — all safe.");
