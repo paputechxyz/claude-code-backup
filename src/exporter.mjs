@@ -161,7 +161,7 @@ export async function exportLatest(backupDir = BACKUP_DIR) {
     errors.push(`Failed to copy to historical backup folder ${basename(tsBackupDir)}: ${err.message}`);
   }
 
-  // Rotate backups: keep at most 20 historical backups
+  // Rotate backups: keep at most 100 historical backups
   try {
     const dirEntries = await readdir(backupDir, { withFileTypes: true });
     const backupDirs = [];
@@ -171,7 +171,7 @@ export async function exportLatest(backupDir = BACKUP_DIR) {
       }
     }
     backupDirs.sort(); // Oldest first
-    const maxBackups = 20;
+    const maxBackups = 100;
     if (backupDirs.length > maxBackups) {
       const toDelete = backupDirs.slice(0, backupDirs.length - maxBackups);
       for (const dirName of toDelete) {
