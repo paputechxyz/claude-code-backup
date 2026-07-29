@@ -12,12 +12,17 @@
 
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { mkdir, readFile, writeFile, access, open } from "node:fs/promises";
+import { rmSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
+const exec = promisify(execFile);
 const HOME = homedir();
 const BACKUP_DIR = join(HOME, ".claude-backups");
 const CONFIG_PATH = join(BACKUP_DIR, "config.json");
+const LOCK_PATH = join(BACKUP_DIR, ".lock");
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -52,6 +57,51 @@ async function loadConfig() {
 async function saveConfig(config) {
   await mkdir(BACKUP_DIR, { recursive: true });
   await writeFile(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
+}
+
+// ── Notifications ────────────────────────────────────────────────────
+
+async function notify(title, message, isError = false) {
+  const sound = isError ? "Basso" : "Glass";
+  const esc = (s) => String(s).replace(/["\\]/g, " ").slice(0, 200);
+  try {
+    await exec("osascript", [
+      "-e",
+      `display notification "${esc(message)}" with title "${esc(title)}" sound name "${sound}"`,
+    ]);
+  } catch { /* never fail the backup over a notification */ }
+}
+
+// ── Concurrency lock ─────────────────────────────────────────────────
+
+function processAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+async function acquireLock() {
+  await mkdir(BACKUP_DIR, { recursive: true });
+  try {
+    const fh = await open(LOCK_PATH, "wx"); // fails if exists
+    await fh.writeFile(String(process.pid));
+    await fh.close();
+    return true;
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
+    // Stale-lock recovery: if the holder PID is no longer alive, steal the lock
+    try {
+      const existing = await readFile(LOCK_PATH, "utf-8");
+      const pid = parseInt(existing.trim(), 10);
+      if (pid && !processAlive(pid)) {
+        await writeFile(LOCK_PATH, String(process.pid));
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+}
+
+function releaseLock() {
+  try { rmSync(LOCK_PATH, { force: true }); } catch {}
 }
 
 // ── Commands ─────────────────────────────────────────────────────────
@@ -121,24 +171,52 @@ async function cmdInit() {
 
   // Scheduler setup
   log("");
-  const intervalStr = await ask("Backup interval in hours (default: 4): ");
-  const interval = parseInt(intervalStr) || 4;
+  const forceScheduler = process.argv.includes("--force-scheduler");
+
+  // Detect any existing schedule that could collide
+  const { detectExistingSchedule } = await import("../src/scheduler.mjs");
+  const cliPath = new URL(import.meta.url).pathname;
+  const existing = await detectExistingSchedule(cliPath);
+
+  let skipSchedulerInstall = false;
+  if (existing.length > 0 && !forceScheduler) {
+    log("⚠️  Existing backup schedule(s) detected:");
+    for (const f of existing) {
+      log(`   - ${f.type}${f.path ? ` (${f.path})` : ""}: ${f.detail}`);
+    }
+    const proceed = await ask("Install another schedule anyway? (y/N): ");
+    if (proceed.toLowerCase() !== "y") {
+      log("Skipping scheduler install. Existing schedule will keep firing.");
+      skipSchedulerInstall = true;
+    }
+  }
+
+  let interval = 4;
+  if (!skipSchedulerInstall) {
+    const intervalStr = await ask("Backup interval in hours (default: 4): ");
+    interval = parseInt(intervalStr) || 4;
+  }
 
   const nodePath = process.execPath;
-  const cliPath = new URL(import.meta.url).pathname;
 
-  try {
-    const result = await install(nodePath, cliPath, interval);
-    log(`\nScheduler installed (every ${interval}h + on boot)`);
-    if (result.timerPath) log(`  Service: ${result.timerPath}`);
-    if (result.plistPath) log(`  LaunchAgent: ${result.plistPath}`);
-  } catch (err) {
-    log(`\nFailed to install scheduler: ${err.message}`);
-    log("You can run backups manually with: npx @mcpware/claude-code-backup run");
+  if (!skipSchedulerInstall) {
+    try {
+      const result = await install(nodePath, cliPath, interval);
+      log(`\nScheduler installed (every ${interval}h + on boot)`);
+      if (result.timerPath) log(`  Service: ${result.timerPath}`);
+      if (result.plistPath) log(`  LaunchAgent: ${result.plistPath}`);
+    } catch (err) {
+      log(`\nFailed to install scheduler: ${err.message}`);
+      log("You can run backups manually with: npx @paputechxyz/claude-code-backup run");
+    }
   }
 
   // Save config
-  await saveConfig({ interval, installedAt: new Date().toISOString() });
+  await saveConfig({
+    interval,
+    installedAt: new Date().toISOString(),
+    schedulerSkipped: skipSchedulerInstall,
+  });
 
   // Run first backup
   log("\nRunning first backup...\n");
@@ -146,34 +224,73 @@ async function cmdInit() {
 
   log("\n✓ Setup complete! Your Claude Code settings are backed up.");
   log("  Backup location: ~/.claude-backups/latest/");
-  log(`  Auto-backup: every ${interval} hours + on boot`);
+  if (!skipSchedulerInstall) {
+    log(`  Auto-backup: every ${interval} hours + on boot`);
+  } else {
+    log("  Auto-backup: handled by previously-installed schedule");
+  }
 }
 
 async function cmdRun() {
   const { exportLatest } = await import("../src/exporter.mjs");
   const { commitAndPush } = await import("../src/git-sync.mjs");
+  const interactive = !!process.stdout.isTTY;
+  const ts = () => new Date().toISOString().slice(0, 16).replace("T", " ");
 
-  log("Scanning and exporting...");
-  const { backupRoot, copied, errors, summary } = await exportLatest(BACKUP_DIR);
-
-  log(`Exported ${copied} items to ${backupRoot}`);
-  if (errors.length > 0) {
-    log(`Warnings: ${errors.length} items failed to export`);
-    for (const err of errors.slice(0, 5)) log(`  - ${err}`);
+  // Concurrency guard
+  if (!(await acquireLock())) {
+    log("Another backup is already running — skipping.");
+    if (interactive) {
+      await notify("Claude Backup ⊘", "Another run is in progress; skipping.", true);
+    }
+    return;
   }
 
-  // Git commit + push
-  log("Committing...");
-  const result = await commitAndPush(BACKUP_DIR);
-  log(result.message);
+  try {
+    if (interactive) {
+      await notify("Claude Backup ▶", `Started • ${ts()}`);
+    }
 
-  // Write last-run info
-  await saveConfig({
-    ...(await loadConfig()),
-    lastRun: new Date().toISOString(),
-    lastCopied: copied,
-    lastErrors: errors.length,
-  });
+    log("Scanning and exporting...");
+    const { backupRoot, copied, errors } = await exportLatest(BACKUP_DIR);
+    log(`Exported ${copied} items to ${backupRoot}`);
+    if (errors.length > 0) {
+      log(`Warnings: ${errors.length} items failed to export`);
+      for (const err of errors.slice(0, 5)) log(`  - ${err}`);
+    }
+
+    log("Committing...");
+    const result = await commitAndPush(BACKUP_DIR);
+    log(result.message);
+
+    await saveConfig({
+      ...(await loadConfig()),
+      lastRun: new Date().toISOString(),
+      lastCopied: copied,
+      lastErrors: errors.length,
+    });
+
+    // Classify outcome and notify
+    if (!result.pushed) {
+      await notify("Claude Backup ⚠️", `Push failed: ${result.message}`, true);
+      process.exitCode = 1;
+    } else if (errors.length > 0) {
+      await notify(
+        "Claude Backup ⚠️",
+        `${copied} items backed up, ${errors.length} export warnings`,
+        true,
+      );
+    } else {
+      const verb = result.committed ? `Backed up ${copied} items` : "No changes";
+      await notify("Claude Backup ✓", `${verb} • ${ts()}`);
+    }
+  } catch (err) {
+    log(`FATAL: ${err.message}`);
+    await notify("Claude Backup ✗", err.message, true);
+    process.exitCode = 1;
+  } finally {
+    releaseLock();
+  }
 }
 
 async function cmdStatus() {

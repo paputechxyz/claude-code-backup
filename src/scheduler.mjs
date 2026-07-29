@@ -2,7 +2,7 @@
  * scheduler.mjs — Install/remove systemd timer (Linux) or launchd plist (macOS).
  */
 
-import { writeFile, mkdir, unlink } from "node:fs/promises";
+import { writeFile, mkdir, unlink, readdir, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir, platform } from "node:os";
 import { execFile } from "node:child_process";
@@ -10,6 +10,10 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 const HOME = homedir();
+
+async function pathExists(p) {
+  try { await access(p); return true; } catch { return false; }
+}
 
 const SERVICE_NAME = "claude-code-backup";
 
@@ -94,7 +98,7 @@ function launchdDir() {
 }
 
 function plistLabel() {
-  return `com.mcpware.${SERVICE_NAME}`;
+  return `com.paputechxyz.${SERVICE_NAME}`;
 }
 
 function plistContent(nodePath, cliPath, intervalSeconds) {
@@ -186,4 +190,91 @@ export async function status() {
     return statusLaunchd();
   }
   return statusSystemd();
+}
+
+// ── Existing schedule detection ─────────────────────────────────────
+
+/**
+ * Detect any existing backup schedule that could collide with a fresh install.
+ * Checks per-user LaunchAgents, system LaunchAgents, loaded launchd jobs,
+ * crontab entries, and (on Linux) systemd user timers.
+ *
+ * Returns an array of findings: [{ type, detail, path? }]
+ */
+export async function detectExistingSchedule(cliPath) {
+  const findings = [];
+  const serviceLabel = `com.paputechxyz.${SERVICE_NAME}`;
+  const legacyLabel = `com.mcpware.${SERVICE_NAME}`;
+
+  // 1. Our own plist (current or legacy label) in per-user LaunchAgents
+  const userAgentsDir = join(HOME, "Library", "LaunchAgents");
+  if (platform() === "darwin") {
+    try {
+      const files = await readdir(userAgentsDir);
+      for (const f of files) {
+        if (!f.endsWith(".plist")) continue;
+        const fullPath = join(userAgentsDir, f);
+        const content = await readFile(fullPath, "utf-8").catch(() => "");
+        const isOurs = f === `${serviceLabel}.plist` || f === `${legacyLabel}.plist`;
+        const mentionsUs = content.includes(SERVICE_NAME) || (cliPath && content.includes(cliPath));
+        if (isOurs) {
+          findings.push({ type: "launchd-ours", path: fullPath, detail: `Our LaunchAgent is already installed (${f})` });
+        } else if (mentionsUs) {
+          findings.push({ type: "launchd-other", path: fullPath, detail: `Another plist references claude-code-backup: ${f}` });
+        }
+      }
+    } catch {}
+
+    // 2. System-wide LaunchAgents (admin-installed)
+    const systemAgentsDir = "/Library/LaunchAgents";
+    try {
+      const files = await readdir(systemAgentsDir);
+      for (const f of files) {
+        if (!f.endsWith(".plist")) continue;
+        const fullPath = join(systemAgentsDir, f);
+        const content = await readFile(fullPath, "utf-8").catch(() => "");
+        if (content.includes(SERVICE_NAME) || (cliPath && content.includes(cliPath))) {
+          findings.push({ type: "launchd-system", path: fullPath, detail: `System-level LaunchAgent references claude-code-backup: ${f}` });
+        }
+      }
+    } catch {}
+
+    // 3. Currently loaded launchd jobs
+    try {
+      const { stdout } = await exec("launchctl", ["list"]);
+      for (const line of stdout.split("\n")) {
+        if (line.includes(SERVICE_NAME)) {
+          const cols = line.trim().split(/\s+/);
+          const label = cols[cols.length - 1];
+          findings.push({ type: "launchd-loaded", detail: `Loaded launchd job: ${label}` });
+        }
+      }
+    } catch {}
+
+    // 4. Crontab entries
+    try {
+      const { stdout } = await exec("crontab", ["-l"]);
+      for (const line of stdout.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        if (trimmed.includes(SERVICE_NAME) || (cliPath && trimmed.includes(cliPath))) {
+          findings.push({ type: "crontab", detail: `crontab entry: ${trimmed.slice(0, 100)}` });
+        }
+      }
+    } catch {} // exit 1 = no crontab, ignore
+  }
+
+  // 5. Linux: systemd user timers
+  if (platform() === "linux") {
+    try {
+      const { stdout } = await exec("systemctl", ["--user", "list-units", "--type=timer"]);
+      for (const line of stdout.split("\n")) {
+        if (line.includes(SERVICE_NAME)) {
+          findings.push({ type: "systemd-timer", detail: `systemd user timer active: ${line.trim().slice(0, 100)}` });
+        }
+      }
+    } catch {}
+  }
+
+  return findings;
 }

@@ -21,7 +21,7 @@ It uses the same scanner as [Claude Code Organizer](https://github.com/mcpware/c
 ## Quick start
 
 ```bash
-npx @mcpware/claude-code-backup init
+npx @paputechxyz/claude-code-backup init
 ```
 
 This will:
@@ -34,19 +34,19 @@ This will:
 ## Manual backup
 
 ```bash
-npx @mcpware/claude-code-backup run
+npx @paputechxyz/claude-code-backup run
 ```
 
 ## Check status
 
 ```bash
-npx @mcpware/claude-code-backup status
+npx @paputechxyz/claude-code-backup status
 ```
 
 ## Remove scheduler
 
 ```bash
-npx @mcpware/claude-code-backup uninstall
+npx @paputechxyz/claude-code-backup uninstall
 ```
 
 This only removes the scheduled task. Your backup data stays in `~/.claude-backups/`.

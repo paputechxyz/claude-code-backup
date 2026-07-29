@@ -1,5 +1,5 @@
 {
-  "name": "@mcpware/claude-code-backup",
+  "name": "@paputechxyz/claude-code-backup",
   "version": "0.1.0",
   "description": "Automatic backup and sync of all Claude Code settings to GitHub",
   "type": "module",
@@ -19,11 +19,11 @@
     "skills",
     "memories"
   ],
-  "author": "mcpware",
+  "author": "paputechxyz",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mcpware/claude-code-backup"
+    "url": "https://github.com/paputechxyz/claude-code-backup"
   },
   "engines": {
     "node": ">=18"

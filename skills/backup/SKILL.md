@@ -18,7 +18,7 @@ Back up all Claude Code settings to GitHub. Scans every scope (global + all proj
 ## Setup (first time only)
 
 ```bash
-npx @mcpware/claude-code-backup init
+npx @paputechxyz/claude-code-backup init
 ```
 
 This creates `~/.claude-backups/`, asks for your GitHub repo URL, and installs a systemd timer (Linux) or LaunchAgent (macOS) for automatic backups.
@@ -27,4 +27,4 @@ This creates `~/.claude-backups/`, asks for your GitHub repo URL, and installs a
 
 - Node.js 18+
 - A private GitHub repo
-- `@mcpware/claude-code-backup` installed (`npm i -g @mcpware/claude-code-backup`)
+- `@paputechxyz/claude-code-backup` installed (`npm i -g @paputechxyz/claude-code-backup`)
