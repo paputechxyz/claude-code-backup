@@ -38,6 +38,8 @@ If an existing schedule is detected, you'll get a `y/N` prompt before a new one 
 
 ```bash
 npx @paputechxyz/claude-code-backup run
+# Or from local checkout:
+just backup
 ```
 
 ## Test notifications
@@ -109,40 +111,80 @@ This protects against the case where a manual `run` coincides with a scheduled 4
 
 ```
 ~/.claude-backups/
-├── .git/                    ← tracked by git, pushed to your private repo
+├── .git/                     ← tracked by git, pushed to your private repo
 ├── .gitignore
-├── .lock                    ← pidfile (held during a run; prevents overlap)
-├── latest/
+├── .lock                     ← pidfile (held during a run; prevents overlap)
+├── latest/                   ← stable active backup used for Git tracking
 │   ├── global/
-│   │   ├── memory/          ← all global memories
-│   │   ├── skill/           ← all global skills (full dirs)
-│   │   ├── mcp/             ← each MCP server as individual .json
-│   │   ├── config/          ← CLAUDE.md, settings.json
-│   │   ├── rule/            ← all rules
+│   │   ├── memory/           ← all global memories
+│   │   ├── skill/            ← all global skills (full dirs)
+│   │   ├── mcp/              ← each MCP server as individual .json
+│   │   ├── config/           ← CLAUDE.md, settings.json
+│   │   ├── rule/             ← all rules
 │   │   ├── plan/
 │   │   ├── agent/
 │   │   ├── command/
 │   │   └── plugin/
 │   ├── -home-user-myproject/
-│   │   ├── memory/          ← project-specific memories
-│   │   ├── skill/           ← project-specific skills
+│   │   ├── memory/           ← project-specific memories
+│   │   ├── skill/            ← project-specific skills
 │   │   ├── mcp/
-│   │   ├── config/          ← project CLAUDE.md, settings
-│   │   └── session/         ← conversation history
+│   │   ├── config/           ← project CLAUDE.md, settings
+│   │   └── session/          ← conversation history
 │   └── backup-summary.json
+├── backup-YYYY-MM-DD_HH-mm-ss/ ← up to 100 timestamped local backups (not git tracked)
 ├── config.json
 └── backup.log
 ```
 
 Each backup overwrites `latest/` so git only tracks the diff, not full copies. Your git history is your version history.
 
-## Restore on a new machine
+## Restoration
+
+You can automatically restore everything back to their original destinations from your latest backup.
 
 ```bash
-git clone git@github.com:you/claude-backup.git ~/.claude-backups
-# Then manually copy files back to their original locations
-# (automated restore coming soon)
+# Preview what will be restored (Dry Run):
+npx @paputechxyz/claude-code-backup restore --dry-run
+# Or from local checkout:
+just restore-dry-run
+
+# Run full restoration (requires interactive confirmation):
+npx @paputechxyz/claude-code-backup restore
+# Or from local checkout:
+just restore
+
+# Force run restoration (bypasses warning prompt):
+npx @paputechxyz/claude-code-backup restore --force
+# Or from local checkout:
+just restore-force
 ```
+
+### Restore a specific version
+Beside the `latest/` directory, up to 100 local timestamped backups are kept inside `~/.claude-backups/` (e.g. `backup-YYYY-MM-DD_HH-mm-ss`). You can restore from a specific version by folder name:
+
+```bash
+npx @paputechxyz/claude-code-backup restore --version backup-2026-07-29_16-56-39
+# Or from local checkout:
+just restore-version backup-2026-07-29_16-56-39
+```
+
+## First-time setup on a new machine
+
+If you are setting up on a completely new computer:
+
+1. Clone your private backup repository directly to `~/.claude-backups`:
+   ```bash
+   git clone git@github.com:you/claude-backup.git ~/.claude-backups
+   ```
+2. Navigate to your checkout directory and initialize the background scheduler:
+   ```bash
+   just init
+   ```
+   Or run the CLI initialization directly:
+   ```bash
+   npx @paputechxyz/claude-code-backup init
+   ```
 
 ## Scheduler details
 

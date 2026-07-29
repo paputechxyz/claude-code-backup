@@ -353,9 +353,12 @@ async function cmdUninstall() {
 async function cmdRestore() {
   const dryRun = process.argv.includes("--dry-run");
   const force = process.argv.includes("--force");
+  const versionIdx = process.argv.indexOf("--version");
+  const version = versionIdx !== -1 ? process.argv[versionIdx + 1] : null;
 
   if (!dryRun && !force) {
-    log("⚠️  WARNING: This will overwrite existing local configurations, memories, skills, and plans.");
+    const targetName = version || "latest";
+    log(`⚠️  WARNING: This will overwrite existing local configurations, memories, skills, and plans with backup version '${targetName}'.`);
     const answer = await ask("Are you sure you want to proceed? (y/N): ");
     if (answer.toLowerCase() !== "y") {
       log("Restore aborted.");
@@ -364,10 +367,10 @@ async function cmdRestore() {
   }
 
   const { restoreAll } = await import("../src/restorer.mjs");
-  log(dryRun ? "🔍 Previewing restore (dry-run)..." : "⏳ Restoring files...");
+  log(dryRun ? `🔍 Previewing restore of version '${version || "latest"}' (dry-run)...` : `⏳ Restoring files from version '${version || "latest"}'...`);
 
   try {
-    const { restoredCount, mcpServersToMerge } = await restoreAll(BACKUP_DIR, { dryRun }, (msg) => {
+    const { restoredCount, mcpServersToMerge } = await restoreAll(BACKUP_DIR, { dryRun, version }, (msg) => {
       log(msg);
     });
 
@@ -427,7 +430,7 @@ switch (command) {
     log("  claude-code-backup init        Set up backup repo + schedule");
     log("  claude-code-backup run         Run backup now");
     log("  claude-code-backup status      Show backup status");
-    log("  claude-code-backup restore     Restore settings from the latest backup");
+    log("  claude-code-backup restore     Restore settings from the latest backup (use --version <folder> to restore historical version)");
     log("  claude-code-backup uninstall   Remove scheduled backup");
     log("  claude-code-backup notify-test Send a test notification banner\n");
     log("Your skills, memories, rules, MCP configs, and settings — all safe.");

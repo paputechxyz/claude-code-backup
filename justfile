@@ -13,3 +13,16 @@ restore:
 # Restore backups and force-overwrite files without prompting
 restore-force:
     node bin/cli.mjs restore --force
+
+# Initialize the backup tool (sets up repository, remote, and registers background scheduler)
+init:
+    node bin/cli.mjs init
+
+# Run a backup manually (scans, copies, and commits changes)
+backup:
+    node bin/cli.mjs run
+
+# Restore a specific historical backup version by folder name
+restore-version version:
+    node bin/cli.mjs restore --version {{version}}
+

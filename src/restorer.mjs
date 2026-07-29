@@ -47,9 +47,9 @@ async function copyRecursive(src, dest, dryRun, logFn) {
 }
 
 export async function restoreAll(backupDir, options = {}, logFn = () => {}) {
-  const latestDir = join(backupDir, "latest");
+  const latestDir = options.version ? join(backupDir, options.version) : join(backupDir, "latest");
   if (!(await exists(latestDir))) {
-    throw new Error(`Backup directory 'latest' not found at ${latestDir}`);
+    throw new Error(`Backup directory '${options.version || "latest"}' not found at ${latestDir}`);
   }
 
   const dryRun = !!options.dryRun;
