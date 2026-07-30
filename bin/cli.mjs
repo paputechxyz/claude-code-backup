@@ -7,6 +7,7 @@
  *   init          — Interactive setup: create backup repo, configure remote, install scheduler
  *   run           — Run a backup now (scan + export + commit + push)
  *   status        — Show last backup info and scheduler status
+ *   interval      — Change backup interval and reinstall scheduler
  *   uninstall     — Remove scheduled backup (keeps backup data)
  */
 
@@ -326,6 +327,8 @@ async function cmdStatus() {
     log("No backup has been run yet.");
   }
 
+  log(`\nBackup interval: every ${config.interval || "unknown"}h`);
+
   log("\nScheduler status:");
   const s = await status();
   log(s);
@@ -342,6 +345,29 @@ async function cmdStatus() {
   } else {
     log("\nGit repo: not initialized. Run 'claude-code-backup init' first.");
   }
+}
+
+async function cmdInterval() {
+  const hours = parseInt(process.argv[3], 10);
+  if (!hours || hours <= 0) {
+    log("Usage: claude-code-backup interval <hours>");
+    process.exitCode = 1;
+    return;
+  }
+
+  const { install } = await import("../src/scheduler.mjs");
+  const nodePath = process.execPath;
+  const cliPath = new URL(import.meta.url).pathname;
+
+  const result = await install(nodePath, cliPath, hours);
+  log(`Scheduler updated to run every ${hours}h`);
+  if (result.timerPath) log(`  Service: ${result.timerPath}`);
+  if (result.plistPath) log(`  LaunchAgent: ${result.plistPath}`);
+
+  const config = await loadConfig();
+  config.interval = hours;
+  config.schedulerSkipped = false;
+  await saveConfig(config);
 }
 
 async function cmdUninstall() {
@@ -415,6 +441,9 @@ switch (command) {
   case "status":
     await cmdStatus();
     break;
+  case "interval":
+    await cmdInterval();
+    break;
   case "uninstall":
     await cmdUninstall();
     break;
@@ -430,6 +459,7 @@ switch (command) {
     log("  claude-code-backup init        Set up backup repo + schedule");
     log("  claude-code-backup run         Run backup now");
     log("  claude-code-backup status      Show backup status");
+    log("  claude-code-backup interval <hours>  Change backup interval and reinstall scheduler");
     log("  claude-code-backup restore     Restore settings from the latest backup (use --version <folder> to restore historical version)");
     log("  claude-code-backup uninstall   Remove scheduled backup");
     log("  claude-code-backup notify-test Send a test notification banner\n");

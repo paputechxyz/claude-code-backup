@@ -22,6 +22,14 @@ init:
 backup:
     node bin/cli.mjs run
 
+# Show backup status and whether the scheduled job (launchd/systemd) is running
+status:
+    node bin/cli.mjs status
+
+# Change the backup interval (hours) and reinstall the scheduled job (launchd/systemd)
+interval hours:
+    node bin/cli.mjs interval {{hours}}
+
 # Restore a specific historical backup version by folder name
 restore-version version:
     node bin/cli.mjs restore --version {{version}}
