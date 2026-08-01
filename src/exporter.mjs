@@ -3,7 +3,7 @@
  * Extracted from claude-code-organizer server.mjs export logic.
  */
 
-import { mkdir, copyFile, writeFile, cp, readdir, rm } from "node:fs/promises";
+import { mkdir, copyFile, writeFile, cp, readdir, rm, rename } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { scan } from "./scanner.mjs";
@@ -87,10 +87,14 @@ export async function exportAll(backupDir = BACKUP_DIR) {
  */
 export async function exportLatest(backupDir = BACKUP_DIR) {
   const latestDir = join(backupDir, "latest");
+  // Stage into a sibling directory and swap at the end. This used to delete
+  // latest/ up front, which meant a crash or a failed scan anywhere below left
+  // the user with no snapshot at all — the previous good one was already gone.
+  const stagingDir = join(backupDir, ".latest.tmp");
 
-  // Clean previous export (but don't delete .git or other top-level files)
+  await mkdir(backupDir, { recursive: true });
   try {
-    await rm(latestDir, { recursive: true, force: true });
+    await rm(stagingDir, { recursive: true, force: true });
   } catch {}
 
   const data = await scan();
@@ -103,7 +107,7 @@ export async function exportLatest(backupDir = BACKUP_DIR) {
 
   for (const item of exportableItems) {
     try {
-      const subDir = join(latestDir, item.scopeId, item.category);
+      const subDir = join(stagingDir, item.scopeId, item.category);
       await mkdir(subDir, { recursive: true });
 
       if (item.category === "skill") {
@@ -138,10 +142,16 @@ export async function exportLatest(backupDir = BACKUP_DIR) {
     categories: [...new Set(exportableItems.map((i) => i.category))],
     counts: data.counts,
   };
+  await mkdir(stagingDir, { recursive: true });
   await writeFile(
-    join(latestDir, "backup-summary.json"),
+    join(stagingDir, "backup-summary.json"),
     JSON.stringify(summary, null, 2) + "\n"
   );
+
+  // Swap staging into place. Only now is the previous snapshot discarded, so an
+  // export that died partway through leaves the old latest/ untouched.
+  await rm(latestDir, { recursive: true, force: true });
+  await rename(stagingDir, latestDir);
 
   // Copy to timestamped folder
   const pad = (n) => String(n).padStart(2, "0");

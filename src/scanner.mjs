@@ -176,9 +176,16 @@ export async function resolveEncodedProjectPath(encoded) {
   // By normalizing both sides we can match "My_Projects" against "My-Projects".
   const norm = (s) => s.toLowerCase().replace(/_/g, "-");
 
+  // Backtracking makes this exponential in the segment count, and it starts at
+  // "/" — on a machine with many same-named directories (or a mounted volume
+  // under /Volumes) an unlucky encoding could readdir its way across the disk.
+  // Cap the work; callers treat null as "couldn't resolve" and skip the scope.
+  let budget = 10_000;
+
   // DFS resolver with backtracking — lists actual directory entries at each
   // level instead of guessing paths, so underscore/hyphen ambiguity is handled.
   async function resolve(currentPath, i) {
+    if (budget-- <= 0) return null;
     if (i >= segments.length) {
       return (await exists(currentPath)) ? currentPath : null;
     }
@@ -224,8 +231,36 @@ export async function resolveEncodedProjectPath(encoded) {
  * Discover all scopes by scanning ~/.claude/projects/ and known repo dirs.
  * Returns an array of scope objects (global + projects, all with parentId: "global").
  */
+/**
+ * Real project paths as recorded by Claude Code in ~/.claude.json.
+ *
+ * The directory names under ~/.claude/projects/ are a lossy encoding — `/`, `.`
+ * and `_` all collapse to `-` — so decoding them by walking the filesystem
+ * cannot round-trip a path like "workspace.nosync" and silently dropped those
+ * projects from every backup. ~/.claude.json stores the untouched absolute
+ * paths, so match against those first and only guess when a project is absent.
+ */
+async function loadKnownProjectPaths() {
+  const byEncoded = new Map();
+  try {
+    const raw = await safeReadFile(join(HOME, ".claude.json"));
+    if (!raw) return byEncoded;
+    const projects = JSON.parse(raw).projects || {};
+    for (const realPath of Object.keys(projects)) {
+      byEncoded.set(encodeProjectPath(realPath), realPath);
+    }
+  } catch {}
+  return byEncoded;
+}
+
+/** Mirror Claude Code's encoding of an absolute path into a directory name. */
+function encodeProjectPath(realPath) {
+  return realPath.replace(/[/._]/g, "-");
+}
+
 async function discoverScopes() {
   const scopes = [];
+  const knownPaths = await loadKnownProjectPaths();
 
   // Global scope
   scopes.push({
@@ -252,7 +287,7 @@ async function discoverScopes() {
     // The encoding replaces / with - and prepends -.
     // E.g. -home-user-mycompany-repo1 → /home/user/mycompany/repo1
     // Since directory names can contain dashes, we resolve by checking which real path exists.
-    const realPath = await resolveEncodedProjectPath(d.name);
+    const realPath = knownPaths.get(d.name) || (await resolveEncodedProjectPath(d.name));
     if (!realPath) continue;
 
     const shortName = basename(realPath);

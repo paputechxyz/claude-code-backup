@@ -18,6 +18,12 @@ import { rmSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+
+// Absolute path to this file. `new URL(import.meta.url).pathname` looks
+// equivalent but stays percent-encoded, so a home directory containing a space
+// produced a scheduler entry pointing at a file that doesn't exist.
+const CLI_PATH = fileURLToPath(import.meta.url);
 
 const exec = promisify(execFile);
 const HOME = homedir();
@@ -37,13 +43,51 @@ function log(msg) {
   }
 }
 
-function ask(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
+// One readline for the whole process. Creating a fresh interface per prompt
+// meant the first one buffered every line already sitting on a piped stdin, so
+// later prompts saw EOF — and each open/close cycle toggles the TTY in and out
+// of raw mode, which leaves the terminal without echo if we exit mid-prompt.
+let _rl = null;
+// Set once stdin is exhausted. Reopening a readline on a closed stdin just
+// closes again, so every later prompt takes its default instead of throwing.
+let _stdinDone = false;
+
+function prompts() {
+  if (!_rl) {
+    _rl = createInterface({ input: process.stdin, output: process.stdout });
+    _rl.once("close", () => {
+      _stdinDone = true;
+      _rl = null;
     });
+  }
+  return _rl;
+}
+
+// Release stdin so the process can exit once we're done asking things.
+function closePrompts() {
+  _stdinDone = true;
+  if (_rl) _rl.close();
+  _rl = null;
+}
+
+function ask(question) {
+  // EOF (piped/closed stdin, ^D) fires 'close' and the question callback never
+  // runs. Without this the promise hangs forever and node exits with "Detected
+  // unsettled top-level await", abandoning setup half-done.
+  if (_stdinDone) return Promise.resolve("");
+
+  const rl = prompts();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      rl.off("close", onClose);
+      resolve(value);
+    };
+    const onClose = () => finish("");
+    rl.once("close", onClose);
+    rl.question(question, (answer) => finish(answer.trim()));
   });
 }
 
@@ -104,6 +148,7 @@ async function acquireLock() {
     const fh = await open(LOCK_PATH, "wx"); // fails if exists
     await fh.writeFile(String(process.pid));
     await fh.close();
+    _holdsLock = true;
     return true;
   } catch (err) {
     if (err.code !== "EEXIST") throw err;
@@ -113,6 +158,7 @@ async function acquireLock() {
       const pid = parseInt(existing.trim(), 10);
       if (pid && !processAlive(pid)) {
         await writeFile(LOCK_PATH, String(process.pid));
+        _holdsLock = true;
         return true;
       }
     } catch {}
@@ -120,9 +166,25 @@ async function acquireLock() {
   }
 }
 
+let _holdsLock = false;
+
 function releaseLock() {
+  if (!_holdsLock) return;
+  _holdsLock = false;
   try { rmSync(LOCK_PATH, { force: true }); } catch {}
 }
+
+// A killed run used to leave its pidfile behind: `finally` doesn't run on
+// SIGINT/SIGTERM. Stale-lock recovery eventually cleans that up, but only once
+// the PID is dead *and* unrecycled, so drop the lock on the way out instead.
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    releaseLock();
+    closePrompts();
+    process.exit(130);
+  });
+}
+process.on("exit", releaseLock);
 
 // ── Commands ─────────────────────────────────────────────────────────
 
@@ -161,6 +223,7 @@ async function cmdInit() {
         "*.log",
         "config.json",
         ".lock",
+        ".latest.tmp/",
         "",
       ].join("\n")
     );
@@ -196,7 +259,7 @@ async function cmdInit() {
 
   // Detect any existing schedule that could collide
   const { detectExistingSchedule } = await import("../src/scheduler.mjs");
-  const cliPath = new URL(import.meta.url).pathname;
+  const cliPath = CLI_PATH;
   const existing = await detectExistingSchedule(cliPath);
 
   let skipSchedulerInstall = false;
@@ -220,6 +283,36 @@ async function cmdInit() {
 
   const nodePath = process.execPath;
 
+  // The scheduler bakes this absolute path into the LaunchAgent/systemd unit.
+  // Under nvm/fnm/volta/asdf that path contains a version number and vanishes
+  // the moment the user upgrades or prunes that version, leaving a scheduled
+  // job that fails silently forever. We can't pick a better path for them, but
+  // they should know the backup is tied to this specific runtime.
+  if (!skipSchedulerInstall && /\/(\.nvm|\.fnm|\.volta|\.asdf)\//.test(nodePath)) {
+    log(`\n⚠️  Scheduling against a version-managed Node: ${nodePath}`);
+    log("   If you remove or upgrade this Node version, re-run 'ccb init' to");
+    log("   repoint the schedule — otherwise scheduled backups stop silently.");
+  }
+
+  // Save config
+  await saveConfig({
+    interval,
+    installedAt: new Date().toISOString(),
+    schedulerSkipped: skipSchedulerInstall,
+  });
+
+  // We're done asking questions — hand stdin back before doing any real work,
+  // so a failure below can't strand the terminal in readline's raw mode.
+  closePrompts();
+
+  // Run the first backup BEFORE installing the scheduler. The LaunchAgent sets
+  // RunAtLoad, so `launchctl load` fires a second `ccb run` the instant it is
+  // installed. Installing first meant that job raced this one over the same
+  // ~/.claude-backups — and exportLatest opens by deleting latest/, so each
+  // process would wipe files the other was still copying.
+  log("\nRunning first backup...\n");
+  await cmdRun();
+
   if (!skipSchedulerInstall) {
     try {
       const result = await install(nodePath, cliPath, interval);
@@ -231,17 +324,6 @@ async function cmdInit() {
       log("You can run backups manually with: ccb run");
     }
   }
-
-  // Save config
-  await saveConfig({
-    interval,
-    installedAt: new Date().toISOString(),
-    schedulerSkipped: skipSchedulerInstall,
-  });
-
-  // Run first backup
-  log("\nRunning first backup...\n");
-  await cmdRun();
 
   log("\n✓ Setup complete! Your Claude Code settings are backed up.");
   log("  Backup location: ~/.claude-backups/latest/");
@@ -357,7 +439,7 @@ async function cmdInterval() {
 
   const { install } = await import("../src/scheduler.mjs");
   const nodePath = process.execPath;
-  const cliPath = new URL(import.meta.url).pathname;
+  const cliPath = CLI_PATH;
 
   const result = await install(nodePath, cliPath, hours);
   log(`Scheduler updated to run every ${hours}h`);
@@ -386,11 +468,15 @@ async function cmdRestore() {
     const targetName = version || "latest";
     log(`⚠️  WARNING: This will overwrite existing local configurations, memories, skills, and plans with backup version '${targetName}'.`);
     const answer = await ask("Are you sure you want to proceed? (y/N): ");
+    // An empty answer also covers EOF on a non-interactive stdin — refuse to
+    // overwrite the user's live config when nobody actually confirmed.
     if (answer.toLowerCase() !== "y") {
       log("Restore aborted.");
+      closePrompts();
       return;
     }
   }
+  closePrompts();
 
   const { restoreAll } = await import("../src/restorer.mjs");
   log(dryRun ? `🔍 Previewing restore of version '${version || "latest"}' (dry-run)...` : `⏳ Restoring files from version '${version || "latest"}'...`);

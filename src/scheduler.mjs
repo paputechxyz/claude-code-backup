@@ -137,7 +137,16 @@ async function installLaunchd(nodePath, cliPath, intervalHours) {
   try {
     await exec("launchctl", ["unload", plistPath]);
   } catch {}
-  await exec("launchctl", ["load", plistPath]);
+
+  try {
+    await exec("launchctl", ["load", plistPath]);
+  } catch (err) {
+    // The plist is written before it's loaded, so a load failure used to leave
+    // an orphan on disk that launchd would pick up at the next login — an
+    // install the user was told had failed. Take it back out.
+    try { await unlink(plistPath); } catch {}
+    throw err;
+  }
 
   return { plistPath };
 }
