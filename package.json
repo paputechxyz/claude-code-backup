@@ -1,9 +1,10 @@
 {
   "name": "@paputechxyz/claude-code-backup",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Automatic backup and sync of all Claude Code settings to GitHub",
   "type": "module",
   "bin": {
+    "ccb": "./bin/cli.mjs",
     "claude-code-backup": "./bin/cli.mjs"
   },
   "files": [
@@ -28,7 +29,12 @@
   "engines": {
     "node": ">=18"
   },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  },
   "scripts": {
+    "build": "esbuild bin/cli.mjs --bundle --platform=node --format=esm --target=node18 --outfile=dist/ccb.mjs",
+    "clean": "rm -rf dist",
     "notify:test": "node bin/cli.mjs notify-test"
   }
 }

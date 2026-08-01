@@ -7,6 +7,7 @@ Back up all Claude Code settings to GitHub. Scans every scope (global + all proj
 - `/backup` — Run a backup now
 - `/backup init` — First-time setup (create repo, configure remote, install scheduler)
 - `/backup status` — Show last backup time and scheduler status
+- `/backup list` — List available backups (newest first) that can be restored
 - `/backup notify-test` — Send a test macOS notification banner
 
 ## What it does
@@ -32,7 +33,7 @@ A pidfile lock at `~/.claude-backups/.lock` prevents two runs from racing. Stale
 ## Setup (first time only)
 
 ```bash
-npx @paputechxyz/claude-code-backup init
+ccb init
 ```
 
 This creates `~/.claude-backups/`, asks for your GitHub repo URL, and installs a systemd timer (Linux) or LaunchAgent (macOS) for automatic backups. If an existing schedule is detected (any LaunchAgent, launchctl entry, crontab line, or systemd timer referencing this tool), you'll get a `y/N` prompt before installing another one.
