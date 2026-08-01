@@ -488,9 +488,85 @@ async function cmdNotifyTest() {
   log("Sent. Check Notification Center.");
 }
 
+// ── Help ─────────────────────────────────────────────────────────────
+
+// Command catalog — drives both dispatch (below) and the help output, so the
+// two never drift. `args` is the positional-argument hint shown next to the
+// name; `flags` documents the options each command accepts.
+const COMMANDS = {
+  init: {
+    summary: "Set up backup repo + schedule (interactive).",
+    flags: [["--force-scheduler", "Install a schedule even if one already exists"]],
+  },
+  run: { summary: "Run backup now (scan + export + commit + push)." },
+  status: { summary: "Show last backup info and scheduler status." },
+  interval: { args: "<hours>", summary: "Change backup interval and reinstall scheduler." },
+  list: { summary: "List available backups you can restore." },
+  restore: {
+    summary: "Restore settings from a backup (latest by default).",
+    flags: [
+      ["--version <folder>", "Restore a specific historical backup instead of latest"],
+      ["--dry-run", "Preview what would be restored without writing anything"],
+      ["--force", "Skip the overwrite confirmation prompt"],
+    ],
+  },
+  uninstall: { summary: "Remove scheduled backup (keeps backup data)." },
+  "notify-test": { summary: "Send a test notification banner." },
+};
+
+// Short label for the overview list, e.g. "ccb interval <hours>".
+function label(name) {
+  const spec = COMMANDS[name];
+  return `ccb ${name}${spec.args ? ` ${spec.args}` : ""}`;
+}
+
+// Help must print even under --quiet, so write directly instead of via log().
+function out(msg = "") {
+  process.stdout.write(msg + "\n");
+}
+
+function printRootHelp() {
+  out("ccb — Automatic backup of all Claude Code settings\n");
+  out("Usage:");
+  const names = Object.keys(COMMANDS);
+  const width = Math.max(...names.map((n) => label(n).length));
+  for (const name of names) {
+    out(`  ${label(name).padEnd(width)}  ${COMMANDS[name].summary}`);
+  }
+  out("\nRun 'ccb <command> --help' for details on a command.");
+  out("\nYour skills, memories, rules, MCP configs, and settings — all safe.");
+}
+
+function printCommandHelp(name) {
+  const spec = COMMANDS[name];
+  if (!spec) return printRootHelp();
+  out(`${spec.summary}\n`);
+  out(`Usage:\n  ${label(name)}${spec.flags?.length ? " [options]" : ""}`);
+  if (spec.flags?.length) {
+    out("\nOptions:");
+    const width = Math.max(...spec.flags.map(([f]) => f.length));
+    for (const [flag, desc] of spec.flags) {
+      out(`  ${flag.padEnd(width)}  ${desc}`);
+    }
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────
 
-const command = process.argv[2];
+const args = process.argv.slice(2);
+const command = args[0];
+
+// A --help/-h flag anywhere must show help and never run the command — several
+// subcommands have side effects (run, restore, uninstall), so silently
+// ignoring the flag and executing was both surprising and unsafe.
+if (args.includes("--help") || args.includes("-h")) {
+  // Target = first non-flag token, so `ccb restore --help` documents restore
+  // while a bare `ccb --help` shows the overview.
+  const target = args.find((a) => !a.startsWith("-"));
+  if (target && COMMANDS[target]) printCommandHelp(target);
+  else printRootHelp();
+  process.exit(0);
+}
 
 switch (command) {
   case "init":
@@ -517,17 +593,11 @@ switch (command) {
   case "notify-test":
     await cmdNotifyTest();
     break;
+  case "help":
+    // `ccb help [command]` mirrors the --help flag.
+    printCommandHelp(args[1]);
+    break;
   default:
-    log("ccb — Automatic backup of all Claude Code settings\n");
-    log("Usage:");
-    log("  ccb init        Set up backup repo + schedule");
-    log("  ccb run         Run backup now");
-    log("  ccb status      Show backup status");
-    log("  ccb interval <hours>  Change backup interval and reinstall scheduler");
-    log("  ccb list        List available backups you can restore");
-    log("  ccb restore     Restore settings from the latest backup (use --version <folder> to restore historical version)");
-    log("  ccb uninstall   Remove scheduled backup");
-    log("  ccb notify-test Send a test notification banner\n");
-    log("Your skills, memories, rules, MCP configs, and settings — all safe.");
+    printRootHelp();
     break;
 }
