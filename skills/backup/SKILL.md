@@ -32,7 +32,7 @@ A pidfile lock at `~/.claude-backups/.lock` prevents two runs from racing. Stale
 ## Setup (first time only)
 
 ```bash
-npx @paputechxyz/claude-code-backup init
+ccb init
 ```
 
 This creates `~/.claude-backups/`, asks for your GitHub repo URL, and installs a systemd timer (Linux) or LaunchAgent (macOS) for automatic backups. If an existing schedule is detected (any LaunchAgent, launchctl entry, crontab line, or systemd timer referencing this tool), you'll get a `y/N` prompt before installing another one.

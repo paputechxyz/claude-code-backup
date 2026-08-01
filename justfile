@@ -2,6 +2,22 @@
 default:
     @just --list
 
+# Bundle bin/cli.mjs into a single self-contained file at dist/ccb.mjs
+build:
+    npm run build
+
+# Build and install the `ccb` binary into ~/.local/bin
+install: build
+    mkdir -p ~/.local/bin
+    cp dist/ccb.mjs ~/.local/bin/ccb
+    chmod +x ~/.local/bin/ccb
+    @echo "Installed ~/.local/bin/ccb — ensure ~/.local/bin is on your PATH"
+
+# Remove the installed `ccb` binary (leaves ~/.claude-backups untouched)
+uninstall-bin:
+    rm -f ~/.local/bin/ccb
+    @echo "Removed ~/.local/bin/ccb"
+
 # Dry-run restore to preview what files will be copied
 restore-dry-run:
     node bin/cli.mjs restore --dry-run

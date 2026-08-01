@@ -228,7 +228,7 @@ async function cmdInit() {
       if (result.plistPath) log(`  LaunchAgent: ${result.plistPath}`);
     } catch (err) {
       log(`\nFailed to install scheduler: ${err.message}`);
-      log("You can run backups manually with: npx @paputechxyz/claude-code-backup run");
+      log("You can run backups manually with: ccb run");
     }
   }
 
@@ -350,7 +350,7 @@ async function cmdStatus() {
 async function cmdInterval() {
   const hours = parseInt(process.argv[3], 10);
   if (!hours || hours <= 0) {
-    log("Usage: claude-code-backup interval <hours>");
+    log("Usage: ccb interval <hours>");
     process.exitCode = 1;
     return;
   }
@@ -454,15 +454,15 @@ switch (command) {
     await cmdNotifyTest();
     break;
   default:
-    log("claude-code-backup — Automatic backup of all Claude Code settings\n");
+    log("ccb — Automatic backup of all Claude Code settings\n");
     log("Usage:");
-    log("  claude-code-backup init        Set up backup repo + schedule");
-    log("  claude-code-backup run         Run backup now");
-    log("  claude-code-backup status      Show backup status");
-    log("  claude-code-backup interval <hours>  Change backup interval and reinstall scheduler");
-    log("  claude-code-backup restore     Restore settings from the latest backup (use --version <folder> to restore historical version)");
-    log("  claude-code-backup uninstall   Remove scheduled backup");
-    log("  claude-code-backup notify-test Send a test notification banner\n");
+    log("  ccb init        Set up backup repo + schedule");
+    log("  ccb run         Run backup now");
+    log("  ccb status      Show backup status");
+    log("  ccb interval <hours>  Change backup interval and reinstall scheduler");
+    log("  ccb restore     Restore settings from the latest backup (use --version <folder> to restore historical version)");
+    log("  ccb uninstall   Remove scheduled backup");
+    log("  ccb notify-test Send a test notification banner\n");
     log("Your skills, memories, rules, MCP configs, and settings — all safe.");
     break;
 }

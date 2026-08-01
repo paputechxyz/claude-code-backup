@@ -18,10 +18,41 @@ Everything Claude Code stores across your machine, not just `~/.claude/`:
 
 It uses the same scanner as [Claude Code Organizer](https://github.com/mcpware/claude-code-organizer) to discover items across all scopes (global + every project directory you've ever opened Claude Code in).
 
+## Install
+
+The CLI installs as `ccb` (short for **c**laude-**c**ode-**b**ackup). Requires Node.js 18+.
+
+**One-line install into `~/.local/bin`** (recommended):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/paputechxyz/claude-code-backup/main/install.sh | bash
+```
+
+This downloads the latest self-contained release to `~/.local/bin/ccb`. Make sure
+`~/.local/bin` is on your `$PATH`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
+```
+
+**Via npm:**
+
+```bash
+npm i -g @paputechxyz/claude-code-backup   # exposes `ccb`
+```
+
+**From a local checkout** (builds a single-file bundle with esbuild):
+
+```bash
+git clone https://github.com/paputechxyz/claude-code-backup.git
+cd claude-code-backup
+just install        # → ~/.local/bin/ccb
+```
+
 ## Quick start
 
 ```bash
-npx @paputechxyz/claude-code-backup init
+ccb init
 ```
 
 This will:
@@ -37,7 +68,7 @@ If an existing schedule is detected, you'll get a `y/N` prompt before a new one 
 ## Manual backup
 
 ```bash
-npx @paputechxyz/claude-code-backup run
+ccb run
 # Or from local checkout:
 just backup
 ```
@@ -45,7 +76,7 @@ just backup
 ## Test notifications
 
 ```bash
-npx @paputechxyz/claude-code-backup notify-test
+ccb notify-test
 ```
 
 Sends a single test banner so you can verify desktop notifications work end-to-end (see [Notifications](#notifications)).
@@ -53,13 +84,13 @@ Sends a single test banner so you can verify desktop notifications work end-to-e
 ## Check status
 
 ```bash
-npx @paputechxyz/claude-code-backup status
+ccb status
 ```
 
 ## Remove scheduler
 
 ```bash
-npx @paputechxyz/claude-code-backup uninstall
+ccb uninstall
 ```
 
 This only removes the scheduled task. Your backup data stays in `~/.claude-backups/`.
@@ -145,17 +176,17 @@ You can automatically restore everything back to their original destinations fro
 
 ```bash
 # Preview what will be restored (Dry Run):
-npx @paputechxyz/claude-code-backup restore --dry-run
+ccb restore --dry-run
 # Or from local checkout:
 just restore-dry-run
 
 # Run full restoration (requires interactive confirmation):
-npx @paputechxyz/claude-code-backup restore
+ccb restore
 # Or from local checkout:
 just restore
 
 # Force run restoration (bypasses warning prompt):
-npx @paputechxyz/claude-code-backup restore --force
+ccb restore --force
 # Or from local checkout:
 just restore-force
 ```
@@ -164,7 +195,7 @@ just restore-force
 Beside the `latest/` directory, up to 100 local timestamped backups are kept inside `~/.claude-backups/` (e.g. `backup-YYYY-MM-DD_HH-mm-ss`). You can restore from a specific version by folder name:
 
 ```bash
-npx @paputechxyz/claude-code-backup restore --version backup-2026-07-29_16-56-39
+ccb restore --version backup-2026-07-29_16-56-39
 # Or from local checkout:
 just restore-version backup-2026-07-29_16-56-39
 ```
@@ -183,7 +214,7 @@ If you are setting up on a completely new computer:
    ```
    Or run the CLI initialization directly:
    ```bash
-   npx @paputechxyz/claude-code-backup init
+   ccb init
    ```
 
 ## Scheduler details
@@ -195,24 +226,26 @@ If you are setting up on a completely new computer:
 **Detecting failures:** the LaunchAgent sets `process.exitCode = 1` on push failure or fatal error, so `LastExitStatus` in `launchctl list | grep claude-code-backup` reflects real outcome (`0` = success, non-zero = failed). Combined with `backup.log`, this gives you three layers of monitoring:
 
 ```bash
-npx @paputechxyz/claude-code-backup status   # lastRun, lastCopied, lastErrors
+ccb status   # lastRun, lastCopied, lastErrors
 launchctl list | grep claude-code-backup     # PID (empty = idle), LastExitStatus
 tail -100 ~/.claude-backups/backup.log       # full output of scheduled runs
 ```
 
 **Duplicate-schedule detection:** `init` scans `~/Library/LaunchAgents/`, `/Library/LaunchAgents/`, `launchctl list`, `crontab -l`, and (on Linux) `systemctl --user list-units --type=timer` for any existing schedule that references this tool. If found, you get a `y/N` prompt before installing another one.
 
-## Run from a local checkout
+## A note on the scheduler path
 
-If you'd rather not depend on npm:
+The installed scheduler bakes the CLI's own absolute path into `ProgramArguments` (launchd) /
+`ExecStart` (systemd) at `init` time:
 
-```bash
-git clone https://github.com/paputechxyz/claude-code-backup.git
-cd claude-code-backup
-node bin/cli.mjs init
-```
+- If you installed via `curl`/`just install`/`npm i -g`, that path is the stable `ccb`
+  binary (e.g. `~/.local/bin/ccb`) — self-contained, safe to keep.
+- If you instead run `node bin/cli.mjs init` straight from a git checkout, the schedule
+  points at `bin/cli.mjs` inside that checkout, so **don't move or delete the checkout**
+  afterward or scheduled runs will break.
 
-The installed scheduler points `ProgramArguments` at the absolute path of `bin/cli.mjs` in your checkout, so **don't move or delete the checkout** after `init` or scheduled runs will break. The node binary path is also hardcoded (`process.execPath` at install time), so upgrading Node under nvm may require re-running `init`.
+Either way the node binary path is also captured (`process.execPath`) at install time, so
+upgrading Node under nvm may require re-running `init` (or `ccb interval <hours>`).
 
 ## Requirements
 
