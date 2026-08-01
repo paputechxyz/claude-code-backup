@@ -191,8 +191,28 @@ ccb restore --force
 just restore-force
 ```
 
+### List available backups
+Beside the `latest/` directory, up to 100 local timestamped backups are kept inside `~/.claude-backups/` (e.g. `backup-YYYY-MM-DD_HH-mm-ss`). List them (newest first) with:
+
+```bash
+ccb list
+```
+
+```
+Backups in ~/.claude-backups (10):
+
+  NAME                        WHEN              ITEMS
+  latest                      2026-07-31 21:47     52  (current)
+  backup-2026-07-31_21-47-44  2026-07-31 21:47     52
+  backup-2026-07-31_16-32-25  2026-07-31 16:32     50
+  ...
+
+Restore a specific version with:
+  ccb restore --version backup-2026-07-31_21-47-44
+```
+
 ### Restore a specific version
-Beside the `latest/` directory, up to 100 local timestamped backups are kept inside `~/.claude-backups/` (e.g. `backup-YYYY-MM-DD_HH-mm-ss`). You can restore from a specific version by folder name:
+Pick a `NAME` from `ccb list` and pass it by folder name:
 
 ```bash
 ccb restore --version backup-2026-07-29_16-56-39

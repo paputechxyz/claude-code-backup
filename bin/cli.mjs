@@ -13,7 +13,7 @@
 
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { mkdir, readFile, writeFile, access, open } from "node:fs/promises";
+import { mkdir, readFile, writeFile, access, open, readdir, stat } from "node:fs/promises";
 import { rmSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { execFile } from "node:child_process";
@@ -418,6 +418,67 @@ async function cmdRestore() {
   }
 }
 
+async function cmdList() {
+  if (!(await exists(BACKUP_DIR))) {
+    log("No backups found. Run 'ccb init' to set up backups.");
+    return;
+  }
+
+  // Collect the "latest" snapshot plus every timestamped historical folder.
+  const dirents = await readdir(BACKUP_DIR, { withFileTypes: true });
+  const historical = dirents
+    .filter((e) => e.isDirectory() && e.name.startsWith("backup-"))
+    .map((e) => e.name)
+    .sort()
+    .reverse(); // newest first (folder names sort chronologically)
+
+  const hasLatest = dirents.some((e) => e.isDirectory() && e.name === "latest");
+  const ordered = [...(hasLatest ? ["latest"] : []), ...historical];
+
+  if (ordered.length === 0) {
+    log("No backups yet. Run 'ccb run' to create one.");
+    return;
+  }
+
+  // Local time so the column matches the local timestamps in folder names.
+  const pad = (n) => String(n).padStart(2, "0");
+  const fmtDate = (d) =>
+    d instanceof Date && !isNaN(d)
+      ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+      : "unknown";
+
+  // Gather display info for each backup.
+  const rows = [];
+  for (const name of ordered) {
+    const dir = join(BACKUP_DIR, name);
+    let items = "?";
+    let when = null;
+    try {
+      const summary = JSON.parse(await readFile(join(dir, "backup-summary.json"), "utf-8"));
+      items = summary.copied ?? summary.totalItems ?? "?";
+      if (summary.exportedAt) when = new Date(summary.exportedAt);
+    } catch {}
+    if (!when) {
+      const m = name.match(/^backup-(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/);
+      if (m) when = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`);
+      else { try { when = (await stat(dir)).mtime; } catch {} }
+    }
+    rows.push({ name, when: fmtDate(when), items: String(items) });
+  }
+
+  const nameW = Math.max(4, ...rows.map((r) => r.name.length));
+  log(`Backups in ~/.claude-backups (${rows.length}):\n`);
+  log(`  ${"NAME".padEnd(nameW)}  ${"WHEN".padEnd(16)}  ITEMS`);
+  for (const r of rows) {
+    const tag = r.name === "latest" ? "  (current)" : "";
+    log(`  ${r.name.padEnd(nameW)}  ${r.when.padEnd(16)}  ${r.items.padStart(5)}${tag}`);
+  }
+
+  const example = historical[0] || "latest";
+  log(`\nRestore a specific version with:`);
+  log(`  ccb restore --version ${example}`);
+}
+
 async function cmdNotifyTest() {
   log("Sending test notification...");
   await notify(
@@ -447,6 +508,9 @@ switch (command) {
   case "uninstall":
     await cmdUninstall();
     break;
+  case "list":
+    await cmdList();
+    break;
   case "restore":
     await cmdRestore();
     break;
@@ -460,6 +524,7 @@ switch (command) {
     log("  ccb run         Run backup now");
     log("  ccb status      Show backup status");
     log("  ccb interval <hours>  Change backup interval and reinstall scheduler");
+    log("  ccb list        List available backups you can restore");
     log("  ccb restore     Restore settings from the latest backup (use --version <folder> to restore historical version)");
     log("  ccb uninstall   Remove scheduled backup");
     log("  ccb notify-test Send a test notification banner\n");

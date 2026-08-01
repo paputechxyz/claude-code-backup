@@ -18,6 +18,10 @@ uninstall-bin:
     rm -f ~/.local/bin/ccb
     @echo "Removed ~/.local/bin/ccb"
 
+# List available backups (newest first) that can be restored
+list:
+    node bin/cli.mjs list
+
 # Dry-run restore to preview what files will be copied
 restore-dry-run:
     node bin/cli.mjs restore --dry-run

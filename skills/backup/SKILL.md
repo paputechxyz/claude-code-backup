@@ -7,6 +7,7 @@ Back up all Claude Code settings to GitHub. Scans every scope (global + all proj
 - `/backup` — Run a backup now
 - `/backup init` — First-time setup (create repo, configure remote, install scheduler)
 - `/backup status` — Show last backup time and scheduler status
+- `/backup list` — List available backups (newest first) that can be restored
 - `/backup notify-test` — Send a test macOS notification banner
 
 ## What it does
