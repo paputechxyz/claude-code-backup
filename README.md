@@ -47,12 +47,22 @@ ccb init
 `init` will:
 1. Scan your Claude Code settings and show what it found
 2. Ask for your GitHub repo URL (it wires up the git remote for you)
-3. Ask your backup interval (default: every 4 hours)
-4. Install a background scheduler (LaunchAgent on macOS, systemd timer on Linux)
-5. Run the first backup immediately
+3. Run the first backup immediately
 
-That's it — from now on backups run automatically and push to your repo. If a schedule
-already exists you'll get a `y/N` prompt before another is installed.
+Backups are **manual by default** (`ccb run`). To also run them in the background:
+
+```bash
+ccb schedule 4      # every 4 hours + on boot
+```
+
+That installs a LaunchAgent on macOS or a systemd user timer on Linux.
+
+> **Heads up on managed/corporate Macs.** A LaunchAgent that launches an unsigned
+> interpreter out of `~/.nvm` (or `~/.volta`, `~/.asdf`, …) matches how a lot of macOS
+> adware persists. Endpoint security products flag it — SentinelOne has been observed
+> **quarantining the `node` binary itself**, which breaks `node` and `npm` machine-wide
+> until you reinstall them. `ccb schedule` detects common EDR agents and refuses to
+> install; get the tool allowlisted first, then use `ccb schedule --force-scheduler`.
 
 ## Everyday commands
 
@@ -60,6 +70,7 @@ already exists you'll get a `y/N` prompt before another is installed.
 ccb run             # back up right now
 ccb status          # last run time, items copied, any errors
 ccb list            # list saved backups (newest first) you can restore
+ccb schedule 4      # install the background scheduler (opt-in)
 ccb interval 6      # change the schedule (hours)
 ccb uninstall       # remove the scheduler (your backups stay put)
 ccb notify-test     # fire a test macOS notification banner

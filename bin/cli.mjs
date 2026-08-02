@@ -4,7 +4,8 @@
  * claude-code-backup CLI
  *
  * Commands:
- *   init          — Interactive setup: create backup repo, configure remote, install scheduler
+ *   init          — Interactive setup: create backup repo, configure remote, first backup
+ *   schedule      — Install the background scheduler (opt-in)
  *   run           — Run a backup now (scan + export + commit + push)
  *   status        — Show last backup info and scheduler status
  *   interval      — Change backup interval and reinstall scheduler
@@ -191,7 +192,6 @@ process.on("exit", releaseLock);
 async function cmdInit() {
   const { scan } = await import("../src/scanner.mjs");
   const { isGitRepo, initRepo, addRemote } = await import("../src/git-sync.mjs");
-  const { install } = await import("../src/scheduler.mjs");
 
   log("🔍 Scanning Claude Code settings...\n");
 
@@ -253,59 +253,31 @@ async function cmdInit() {
     }
   }
 
-  // Scheduler setup
+  // Scheduler setup — opt-in. Installing a LaunchAgent is the one genuinely
+  // invasive thing this tool does, and on an EDR-managed machine it can get the
+  // node binary it points at quarantined. `init` now only sets up the repo and
+  // takes a backup; scheduling is a separate, deliberate step.
   log("");
-  const forceScheduler = process.argv.includes("--force-scheduler");
-
-  // Detect any existing schedule that could collide
-  const { detectExistingSchedule } = await import("../src/scheduler.mjs");
-  const cliPath = CLI_PATH;
-  const existing = await detectExistingSchedule(cliPath);
-
-  let skipSchedulerInstall = false;
-  if (existing.length > 0 && !forceScheduler) {
-    log("⚠️  Existing backup schedule(s) detected:");
-    for (const f of existing) {
-      log(`   - ${f.type}${f.path ? ` (${f.path})` : ""}: ${f.detail}`);
-    }
-    const proceed = await ask("Install another schedule anyway? (y/N): ");
-    if (proceed.toLowerCase() !== "y") {
-      log("Skipping scheduler install. Existing schedule will keep firing.");
-      skipSchedulerInstall = true;
-    }
-  }
-
+  const wantSchedule = process.argv.includes("--schedule");
   let interval = 4;
-  if (!skipSchedulerInstall) {
+
+  if (wantSchedule) {
     const intervalStr = await ask("Backup interval in hours (default: 4): ");
     interval = parseInt(intervalStr) || 4;
-  }
-
-  const nodePath = process.execPath;
-
-  // The scheduler bakes this absolute path into the LaunchAgent/systemd unit.
-  // Under nvm/fnm/volta/asdf that path contains a version number and vanishes
-  // the moment the user upgrades or prunes that version, leaving a scheduled
-  // job that fails silently forever. We can't pick a better path for them, but
-  // they should know the backup is tied to this specific runtime.
-  if (!skipSchedulerInstall && /\/(\.nvm|\.fnm|\.volta|\.asdf)\//.test(nodePath)) {
-    log(`\n⚠️  Scheduling against a version-managed Node: ${nodePath}`);
-    log("   If you remove or upgrade this Node version, re-run 'ccb init' to");
-    log("   repoint the schedule — otherwise scheduled backups stop silently.");
   }
 
   // Save config
   await saveConfig({
     interval,
     installedAt: new Date().toISOString(),
-    schedulerSkipped: skipSchedulerInstall,
+    schedulerSkipped: !wantSchedule,
   });
 
   // We're done asking questions — hand stdin back before doing any real work,
   // so a failure below can't strand the terminal in readline's raw mode.
   closePrompts();
 
-  // Run the first backup BEFORE installing the scheduler. The LaunchAgent sets
+  // Run the first backup BEFORE installing any scheduler. The LaunchAgent sets
   // RunAtLoad, so `launchctl load` fires a second `ccb run` the instant it is
   // installed. Installing first meant that job raced this one over the same
   // ~/.claude-backups — and exportLatest opens by deleting latest/, so each
@@ -313,24 +285,81 @@ async function cmdInit() {
   log("\nRunning first backup...\n");
   await cmdRun();
 
-  if (!skipSchedulerInstall) {
-    try {
-      const result = await install(nodePath, cliPath, interval);
-      log(`\nScheduler installed (every ${interval}h + on boot)`);
-      if (result.timerPath) log(`  Service: ${result.timerPath}`);
-      if (result.plistPath) log(`  LaunchAgent: ${result.plistPath}`);
-    } catch (err) {
-      log(`\nFailed to install scheduler: ${err.message}`);
-      log("You can run backups manually with: ccb run");
-    }
-  }
+  const scheduled = wantSchedule ? await installSchedule(interval) : false;
 
   log("\n✓ Setup complete! Your Claude Code settings are backed up.");
   log("  Backup location: ~/.claude-backups/latest/");
-  if (!skipSchedulerInstall) {
+  if (scheduled) {
     log(`  Auto-backup: every ${interval} hours + on boot`);
   } else {
-    log("  Auto-backup: handled by previously-installed schedule");
+    log("  Auto-backup: not installed — run 'ccb run', or 'ccb schedule' to automate");
+  }
+}
+
+/**
+ * Install the background scheduler, refusing on machines running endpoint
+ * security unless explicitly forced. Returns true if a schedule was installed.
+ */
+async function installSchedule(intervalHours) {
+  const { install, detectExistingSchedule, detectSecurityAgents } =
+    await import("../src/scheduler.mjs");
+  const force = process.argv.includes("--force-scheduler");
+  const cliPath = CLI_PATH;
+  const nodePath = process.execPath;
+
+  const agents = await detectSecurityAgents();
+  if (agents.length > 0 && !force) {
+    log(`\n⛔ Endpoint security detected: ${agents.join(", ")}`);
+    log("   Refusing to install a LaunchAgent. A scheduled job pointing at an");
+    log(`   unsigned interpreter (${nodePath})`);
+    log("   looks like malware persistence to these agents — one has been seen");
+    log("   quarantining the node binary itself, breaking node system-wide.");
+    log("\n   Use 'ccb run' manually, or ask IT to allowlist this first, then");
+    log("   re-run with:  ccb schedule --force-scheduler");
+    return false;
+  }
+
+  // The scheduler bakes this absolute path into the LaunchAgent/systemd unit.
+  // Under nvm/fnm/volta/asdf that path contains a version number and vanishes
+  // the moment the user upgrades or prunes that version, leaving a scheduled
+  // job that fails silently forever.
+  if (/\/(\.nvm|\.fnm|\.volta|\.asdf)\//.test(nodePath)) {
+    log(`\n⚠️  Scheduling against a version-managed Node: ${nodePath}`);
+    log("   If you remove or upgrade this Node version, re-run 'ccb schedule'");
+    log("   — otherwise scheduled backups stop silently.");
+  }
+
+  const existing = await detectExistingSchedule(cliPath);
+  if (existing.length > 0 && !force) {
+    log("\n⚠️  Existing backup schedule(s) detected:");
+    for (const f of existing) {
+      log(`   - ${f.type}${f.path ? ` (${f.path})` : ""}: ${f.detail}`);
+    }
+    log("   Leaving it alone. Re-run with --force-scheduler to add another.");
+    return false;
+  }
+
+  try {
+    const result = await install(nodePath, cliPath, intervalHours);
+    log(`\nScheduler installed (every ${intervalHours}h + on boot)`);
+    if (result.timerPath) log(`  Service: ${result.timerPath}`);
+    if (result.plistPath) log(`  LaunchAgent: ${result.plistPath}`);
+    return true;
+  } catch (err) {
+    log(`\nFailed to install scheduler: ${err.message}`);
+    log("You can run backups manually with: ccb run");
+    return false;
+  }
+}
+
+async function cmdSchedule() {
+  const hours = parseInt(process.argv[3], 10) || (await loadConfig()).interval || 4;
+  const installed = await installSchedule(hours);
+  if (installed) {
+    const config = await loadConfig();
+    config.interval = hours;
+    config.schedulerSkipped = false;
+    await saveConfig(config);
   }
 }
 
@@ -437,19 +466,15 @@ async function cmdInterval() {
     return;
   }
 
-  const { install } = await import("../src/scheduler.mjs");
-  const nodePath = process.execPath;
-  const cliPath = CLI_PATH;
-
-  const result = await install(nodePath, cliPath, hours);
-  log(`Scheduler updated to run every ${hours}h`);
-  if (result.timerPath) log(`  Service: ${result.timerPath}`);
-  if (result.plistPath) log(`  LaunchAgent: ${result.plistPath}`);
+  // Routed through installSchedule so changing the interval can't quietly
+  // reintroduce a LaunchAgent on a machine where we refused to install one.
+  const installed = await installSchedule(hours);
 
   const config = await loadConfig();
   config.interval = hours;
-  config.schedulerSkipped = false;
+  config.schedulerSkipped = !installed;
   await saveConfig(config);
+  if (installed) log(`Scheduler updated to run every ${hours}h`);
 }
 
 async function cmdUninstall() {
@@ -581,8 +606,16 @@ async function cmdNotifyTest() {
 // name; `flags` documents the options each command accepts.
 const COMMANDS = {
   init: {
-    summary: "Set up backup repo + schedule (interactive).",
-    flags: [["--force-scheduler", "Install a schedule even if one already exists"]],
+    summary: "Set up backup repo and take the first backup (interactive).",
+    flags: [
+      ["--schedule", "Also install the background scheduler (off by default)"],
+      ["--force-scheduler", "Install even if security software or another schedule is present"],
+    ],
+  },
+  schedule: {
+    args: "[hours]",
+    summary: "Install the background scheduler (default: 4h).",
+    flags: [["--force-scheduler", "Install even if security software or another schedule is present"]],
   },
   run: { summary: "Run backup now (scan + export + commit + push)." },
   status: { summary: "Show last backup info and scheduler status." },
@@ -663,6 +696,9 @@ switch (command) {
     break;
   case "status":
     await cmdStatus();
+    break;
+  case "schedule":
+    await cmdSchedule();
     break;
   case "interval":
     await cmdInterval();

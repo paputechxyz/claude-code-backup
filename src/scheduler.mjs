@@ -201,6 +201,41 @@ export async function status() {
   return statusSystemd();
 }
 
+// ── Endpoint-security detection ─────────────────────────────────────
+
+// A LaunchAgent whose ProgramArguments[0] is an unsigned, user-writable
+// interpreter inside a dot-directory (~/.nvm/..., ~/.volta/...) is close enough
+// to how macOS adware persists that behavioural EDR engines treat it as a
+// threat. Observed in practice: SentinelOne quarantined the *node binary* and
+// deleted the plist seconds after `launchctl load`, leaving the user with no
+// working node at all. We can't out-argue the agent, so detect it and stay out
+// of ~/Library/LaunchAgents unless the user insists.
+const SECURITY_AGENTS = [
+  ["SentinelOne", "/Library/Sentinel"],
+  ["CrowdStrike Falcon", "/Library/CS"],
+  ["CrowdStrike Falcon", "/Applications/Falcon.app"],
+  ["Microsoft Defender", "/Library/Application Support/Microsoft/Defender"],
+  ["VMware Carbon Black", "/Applications/VMware Carbon Black Cloud"],
+  ["VMware Carbon Black", "/var/opt/carbonblack"],
+  ["Palo Alto Cortex XDR", "/Library/Application Support/PaloAltoNetworks"],
+  ["Sophos", "/Library/Application Support/Sophos"],
+  ["ESET", "/Library/Application Support/ESET"],
+  ["Trend Micro", "/Library/Application Support/TrendMicro"],
+  ["Elastic Endpoint", "/Library/Elastic/Endpoint"],
+];
+
+/**
+ * Names of endpoint-security agents installed on this machine.
+ * Empty array means none of the ones we know about.
+ */
+export async function detectSecurityAgents() {
+  const found = new Set();
+  for (const [name, path] of SECURITY_AGENTS) {
+    if (await pathExists(path)) found.add(name);
+  }
+  return [...found];
+}
+
 // ── Existing schedule detection ─────────────────────────────────────
 
 /**
