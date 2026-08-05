@@ -1,0 +1,2 @@
+project_name: "claude-code-backup"
+languages: ["typescript", "bash"]

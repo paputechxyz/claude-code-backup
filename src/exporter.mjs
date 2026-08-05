@@ -4,11 +4,22 @@
  */
 
 import { mkdir, copyFile, writeFile, cp, readdir, rm, rename } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
 import { scan } from "./scanner.mjs";
 
 const BACKUP_DIR = join(homedir(), ".claude-backups");
+
+/**
+ * Resolve an item's destination and make sure its parent exists.
+ * Some fileNames are nested (".claude/settings.local.json", "org/plugin"),
+ * so the category dir alone isn't enough to copy into.
+ */
+async function destPath(subDir, name) {
+  const dest = join(subDir, name);
+  await mkdir(dirname(dest), { recursive: true });
+  return dest;
+}
 
 /**
  * Run a full scan and export all items to the backup directory.
@@ -35,11 +46,11 @@ export async function exportAll(backupDir = BACKUP_DIR) {
 
       if (item.category === "skill") {
         // Skills are directories — copy whole dir
-        const dest = join(subDir, item.fileName || basename(item.path));
+        const dest = await destPath(subDir, item.fileName || basename(item.path));
         await cp(item.path, dest, { recursive: true });
       } else if (item.category === "mcp") {
         // MCP entries live inside JSON — export each server config
-        const dest = join(subDir, `${item.name}.json`);
+        const dest = await destPath(subDir, `${item.name}.json`);
         const config = item.mcpConfig || {};
         await writeFile(
           dest,
@@ -47,11 +58,11 @@ export async function exportAll(backupDir = BACKUP_DIR) {
         );
       } else if (item.category === "plugin" && item.path) {
         // Plugins are directories — copy whole dir
-        const dest = join(subDir, item.fileName || basename(item.path));
+        const dest = await destPath(subDir, item.fileName || basename(item.path));
         await cp(item.path, dest, { recursive: true });
       } else if (item.path) {
         // Regular files — copy directly
-        const dest = join(subDir, item.fileName || basename(item.path));
+        const dest = await destPath(subDir, item.fileName || basename(item.path));
         await copyFile(item.path, dest);
       }
       copied++;
@@ -111,20 +122,20 @@ export async function exportLatest(backupDir = BACKUP_DIR) {
       await mkdir(subDir, { recursive: true });
 
       if (item.category === "skill") {
-        const dest = join(subDir, item.fileName || basename(item.path));
+        const dest = await destPath(subDir, item.fileName || basename(item.path));
         await cp(item.path, dest, { recursive: true });
       } else if (item.category === "mcp") {
-        const dest = join(subDir, `${item.name}.json`);
+        const dest = await destPath(subDir, `${item.name}.json`);
         const config = item.mcpConfig || {};
         await writeFile(
           dest,
           JSON.stringify({ [item.name]: config }, null, 2) + "\n"
         );
       } else if (item.category === "plugin" && item.path) {
-        const dest = join(subDir, item.fileName || basename(item.path));
+        const dest = await destPath(subDir, item.fileName || basename(item.path));
         await cp(item.path, dest, { recursive: true });
       } else if (item.path) {
-        const dest = join(subDir, item.fileName || basename(item.path));
+        const dest = await destPath(subDir, item.fileName || basename(item.path));
         await copyFile(item.path, dest);
       }
       copied++;
