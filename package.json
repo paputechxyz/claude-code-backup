@@ -1,6 +1,6 @@
 {
   "name": "@paputechxyz/claude-code-backup",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Automatic backup and sync of all Claude Code settings to GitHub",
   "type": "module",
   "bin": {
